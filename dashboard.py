@@ -189,7 +189,7 @@ st.subheader("🏆 Top 5 produtos mais mostrados pela Sofia")
 top_produtos = run_query(
     f"""
     WITH produtos AS (
-        SELECT (regexp_matches(resposta_sofia, 'editorafundamento\\.com\\.br/products/([a-z0-9-]+)', 'g'))[1] AS handle
+        SELECT (regexp_matches(resposta_sofia, 'editorafundamento[.]com[.]br/products/([a-z0-9-]+)', 'g'))[1] AS handle
         FROM conversas_sofia
         WHERE (created_at AT TIME ZONE 'America/Sao_Paulo')::date
               BETWEEN '{data_inicio.isoformat()}' AND '{data_fim.isoformat()}'
