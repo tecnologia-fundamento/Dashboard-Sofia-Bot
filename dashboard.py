@@ -87,27 +87,27 @@ diario = run_query(
     """
 )
 
-# === Cards (queries diretas pra evitar overcounting de clientes recorrentes) ===
+# === Cards (atendimento = cliente único POR DIA: se o mesmo cliente volta em outro dia, conta de novo) ===
 cards_data = run_query(
     f"""
     SELECT
-        COUNT(DISTINCT telefone) AS clientes_unicos,
-        COUNT(DISTINCT telefone) FILTER (WHERE escalado_humano) AS transferidos,
+        COUNT(DISTINCT (telefone, (created_at AT TIME ZONE 'America/Sao_Paulo')::date)) AS atendimentos,
+        COUNT(DISTINCT (telefone, (created_at AT TIME ZONE 'America/Sao_Paulo')::date)) FILTER (WHERE escalado_humano) AS transferidos,
         COUNT(*) FILTER (WHERE resposta_sofia LIKE '%/products/%') AS links_produto
     FROM conversas_sofia
     WHERE (created_at AT TIME ZONE 'America/Sao_Paulo')::date
           BETWEEN '{data_inicio.isoformat()}' AND '{data_fim.isoformat()}'
     """
 )
-total_clientes = int(cards_data["clientes_unicos"].iloc[0])
+total_atendimentos = int(cards_data["atendimentos"].iloc[0])
 total_transferidos = int(cards_data["transferidos"].iloc[0])
-total_sozinha = total_clientes - total_transferidos
+total_sozinha = total_atendimentos - total_transferidos
 total_links = int(cards_data["links_produto"].iloc[0])
-pct_sozinha = (total_sozinha / total_clientes * 100) if total_clientes else 0
-pct_transf = (total_transferidos / total_clientes * 100) if total_clientes else 0
+pct_sozinha = (total_sozinha / total_atendimentos * 100) if total_atendimentos else 0
+pct_transf = (total_transferidos / total_atendimentos * 100) if total_atendimentos else 0
 
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Clientes únicos", f"{total_clientes:,}".replace(",", "."))
+col1.metric("Atendimentos", f"{total_atendimentos:,}".replace(",", "."))
 col2.metric(
     "Atendidos sozinha",
     f"{total_sozinha:,}".replace(",", "."),
