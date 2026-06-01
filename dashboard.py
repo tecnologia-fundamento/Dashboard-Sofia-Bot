@@ -162,7 +162,7 @@ col_h, col_d = st.columns(2)
 por_hora = run_query(
     f"""
     SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE 'America/Sao_Paulo')::int AS hora,
-           COUNT(*) AS msgs
+           COUNT(DISTINCT telefone) AS conversas
     FROM conversas_sofia
     WHERE (created_at AT TIME ZONE 'America/Sao_Paulo')::date
           BETWEEN '{data_inicio.isoformat()}' AND '{data_fim.isoformat()}'
@@ -172,25 +172,25 @@ por_hora = run_query(
 )
 horas_completas = pd.DataFrame({"hora": list(range(24))})
 por_hora = horas_completas.merge(por_hora, on="hora", how="left").fillna(0)
-por_hora["msgs"] = por_hora["msgs"].astype(int)
+por_hora["conversas"] = por_hora["conversas"].astype(int)
 por_hora["hora_label"] = por_hora["hora"].apply(lambda h: f"{int(h):02d}h")
 
 with col_h:
-    st.subheader("⏰ Volume por hora do dia")
-    fig_hora = px.bar(por_hora, x="hora_label", y="msgs", text="msgs")
+    st.subheader("⏰ Conversas por hora do dia")
+    fig_hora = px.bar(por_hora, x="hora_label", y="conversas", text="conversas")
     fig_hora.update_traces(marker_color="#1abc9c", textposition="outside")
     fig_hora.update_layout(
         height=320,
         margin=dict(l=0, r=0, t=10, b=0),
         xaxis_title="",
-        yaxis_title="Mensagens",
+        yaxis_title="Conversas",
     )
     st.plotly_chart(fig_hora, use_container_width=True)
 
 por_dow = run_query(
     f"""
     SELECT EXTRACT(DOW FROM created_at AT TIME ZONE 'America/Sao_Paulo')::int AS dow,
-           COUNT(*) AS msgs
+           COUNT(DISTINCT telefone) AS conversas
     FROM conversas_sofia
     WHERE (created_at AT TIME ZONE 'America/Sao_Paulo')::date
           BETWEEN '{data_inicio.isoformat()}' AND '{data_fim.isoformat()}'
@@ -201,18 +201,18 @@ por_dow = run_query(
 nomes_dow = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
 dow_completos = pd.DataFrame({"dow": list(range(7))})
 por_dow = dow_completos.merge(por_dow, on="dow", how="left").fillna(0)
-por_dow["msgs"] = por_dow["msgs"].astype(int)
+por_dow["conversas"] = por_dow["conversas"].astype(int)
 por_dow["dia"] = por_dow["dow"].apply(lambda d: nomes_dow[int(d)])
 
 with col_d:
-    st.subheader("📅 Volume por dia da semana")
-    fig_dow = px.bar(por_dow, x="dia", y="msgs", text="msgs")
+    st.subheader("📅 Conversas por dia da semana")
+    fig_dow = px.bar(por_dow, x="dia", y="conversas", text="conversas")
     fig_dow.update_traces(marker_color="#e67e22", textposition="outside")
     fig_dow.update_layout(
         height=320,
         margin=dict(l=0, r=0, t=10, b=0),
         xaxis_title="",
-        yaxis_title="Mensagens",
+        yaxis_title="Conversas",
     )
     st.plotly_chart(fig_dow, use_container_width=True)
 
