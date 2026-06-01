@@ -188,14 +188,9 @@ st.plotly_chart(fig_split, use_container_width=True)
 st.subheader("🏆 Top 5 produtos mais mostrados pela Sofia")
 top_produtos = run_query(
     f"""
-    WITH produtos AS (
-        SELECT (regexp_matches(resposta_sofia, 'editorafundamento[.]com[.]br/products/([a-z0-9-]+)', 'g'))[1] AS handle
-        FROM conversas_sofia
-        WHERE (created_at AT TIME ZONE 'America/Sao_Paulo')::date
-              BETWEEN '{data_inicio.isoformat()}' AND '{data_fim.isoformat()}'
-    )
     SELECT handle, COUNT(*) AS mencoes
-    FROM produtos
+    FROM sofia_produtos_mostrados
+    WHERE dia BETWEEN '{data_inicio.isoformat()}' AND '{data_fim.isoformat()}'
     GROUP BY handle
     ORDER BY mencoes DESC
     LIMIT 5
