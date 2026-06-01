@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import psycopg2
 import plotly.express as px
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 st.set_page_config(page_title="Dashboard Sofia", page_icon="🤖", layout="wide")
 
@@ -37,17 +37,49 @@ def run_query(query: str) -> pd.DataFrame:
 st.title("🤖 Dashboard Sofia — Editora Fundamento")
 st.caption(f"Atualizado em {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
-period_days = st.selectbox(
+opcao = st.radio(
     "Período",
-    [7, 14, 30],
-    index=0,
-    format_func=lambda x: f"Últimos {x} dias",
+    ["Hoje", "Ontem", "Últimos 7 dias", "Últimos 14 dias", "Últimos 30 dias", "Personalizado"],
+    horizontal=True,
+    index=2,
+)
+
+hoje = date.today()
+if opcao == "Hoje":
+    data_inicio = data_fim = hoje
+elif opcao == "Ontem":
+    data_inicio = data_fim = hoje - timedelta(days=1)
+elif opcao == "Últimos 7 dias":
+    data_fim = hoje
+    data_inicio = hoje - timedelta(days=6)
+elif opcao == "Últimos 14 dias":
+    data_fim = hoje
+    data_inicio = hoje - timedelta(days=13)
+elif opcao == "Últimos 30 dias":
+    data_fim = hoje
+    data_inicio = hoje - timedelta(days=29)
+else:  # Personalizado
+    intervalo = st.date_input(
+        "Selecione o período",
+        value=(hoje - timedelta(days=6), hoje),
+        max_value=hoje,
+        format="DD/MM/YYYY",
+    )
+    if isinstance(intervalo, tuple) and len(intervalo) == 2:
+        data_inicio, data_fim = intervalo
+    elif isinstance(intervalo, date):
+        data_inicio = data_fim = intervalo
+    else:
+        data_inicio = data_fim = hoje
+
+st.caption(
+    f"Mostrando dados de **{data_inicio.strftime('%d/%m/%Y')}** até **{data_fim.strftime('%d/%m/%Y')}**."
 )
 
 diario = run_query(
     f"""
     SELECT * FROM sofia_dashboard_diario
-    WHERE dia >= CURRENT_DATE - INTERVAL '{period_days} days'
+    WHERE dia BETWEEN '{data_inicio.isoformat()}' AND '{data_fim.isoformat()}'
     ORDER BY dia
     """
 )
@@ -59,7 +91,7 @@ por_agente = run_query(
            SUM(transferencias_efetivadas) AS transferencias_ok,
            SUM(transferencias_perdidas) AS transferencias_perdidas
     FROM sofia_metricas_diarias
-    WHERE dia >= CURRENT_DATE - INTERVAL '{period_days} days'
+    WHERE dia BETWEEN '{data_inicio.isoformat()}' AND '{data_fim.isoformat()}'
     GROUP BY agente_usado
     ORDER BY msgs DESC
     """
@@ -155,17 +187,23 @@ with col_a:
 
 with col_b:
     st.subheader("📋 Top 15 conversas problemáticas")
-    max_score = int(top_problemas["score_problema"].max() or 1)
-    st.dataframe(
-        top_problemas,
-        use_container_width=True,
-        hide_index=True,
-        height=350,
-        column_config={
-            "score_problema": st.column_config.ProgressColumn(
-                "Score", min_value=0, max_value=max_score, format="%d"
-            )
-        },
-    )
+    if top_problemas.empty:
+        st.info("Nenhum problema registrado no período.")
+    else:
+        max_val = top_problemas["score_problema"].max()
+        max_score = (
+            int(max_val) if pd.notna(max_val) and max_val and max_val > 0 else 1
+        )
+        st.dataframe(
+            top_problemas,
+            use_container_width=True,
+            hide_index=True,
+            height=350,
+            column_config={
+                "score_problema": st.column_config.ProgressColumn(
+                    "Score", min_value=0, max_value=max_score, format="%d"
+                )
+            },
+        )
 
 st.caption("Dados cacheados por 5 minutos. Recarregue a página para forçar atualização.")
