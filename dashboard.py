@@ -9,7 +9,7 @@ st.set_page_config(page_title="Dashboard Sofia", page_icon="🤖", layout="wide"
 
 @st.cache_resource
 def get_connection():
-    return psycopg2.connect(
+    conn = psycopg2.connect(
         host=st.secrets["db"]["host"],
         port=int(st.secrets["db"]["port"]),
         dbname=st.secrets["db"]["database"],
@@ -17,12 +17,21 @@ def get_connection():
         password=st.secrets["db"]["password"],
         sslmode="require",
     )
+    conn.autocommit = True
+    return conn
 
 
 @st.cache_data(ttl=300)
 def run_query(query: str) -> pd.DataFrame:
     conn = get_connection()
-    return pd.read_sql(query, conn)
+    try:
+        return pd.read_sql(query, conn)
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
 
 
 st.title("🤖 Dashboard Sofia — Editora Fundamento")
