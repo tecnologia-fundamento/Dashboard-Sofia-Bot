@@ -87,57 +87,29 @@ diario = run_query(
     """
 )
 
-# Periodo anterior (mesma duracao, deslocado pra tras) — pra comparacao
-periodo_dias = (data_fim - data_inicio).days + 1
-anterior_fim = data_inicio - timedelta(days=1)
-anterior_inicio = anterior_fim - timedelta(days=periodo_dias - 1)
-anterior = run_query(
-    f"""
-    SELECT * FROM sofia_dashboard_diario
-    WHERE dia BETWEEN '{anterior_inicio.isoformat()}' AND '{anterior_fim.isoformat()}'
-    """
-)
-
-
-def delta_pct(atual: int, ant: int):
-    if not ant:
-        return None
-    return f"{((atual - ant) / ant * 100):+.1f}% vs anterior"
-
-
-ant_clientes = int(anterior["clientes_unicos"].sum()) if not anterior.empty else 0
-ant_sozinha = int(anterior["clientes_atendidos_sozinha"].sum()) if not anterior.empty else 0
-ant_transferidos = int(anterior["clientes_transferidos"].sum()) if not anterior.empty else 0
-ant_links = int(anterior["mensagens_com_link_produto"].sum()) if not anterior.empty else 0
-
 # === Cards ===
 total_clientes = int(diario["clientes_unicos"].sum())
 total_sozinha = int(diario["clientes_atendidos_sozinha"].sum())
 total_transferidos = int(diario["clientes_transferidos"].sum())
 total_links = int(diario["mensagens_com_link_produto"].sum())
+pct_sozinha = (total_sozinha / total_clientes * 100) if total_clientes else 0
+pct_transf = (total_transferidos / total_clientes * 100) if total_clientes else 0
 
 col1, col2, col3, col4 = st.columns(4)
-col1.metric(
-    "Clientes únicos",
-    f"{total_clientes:,}".replace(",", "."),
-    delta_pct(total_clientes, ant_clientes),
-)
+col1.metric("Clientes únicos", f"{total_clientes:,}".replace(",", "."))
 col2.metric(
     "Atendidos sozinha",
     f"{total_sozinha:,}".replace(",", "."),
-    delta_pct(total_sozinha, ant_sozinha),
+    f"{pct_sozinha:.1f}% do total",
+    delta_color="off",
 )
 col3.metric(
     "Transferidos",
     f"{total_transferidos:,}".replace(",", "."),
-    delta_pct(total_transferidos, ant_transferidos),
-    delta_color="inverse",
+    f"{pct_transf:.1f}% do total",
+    delta_color="off",
 )
-col4.metric(
-    "Links de produto",
-    f"{total_links:,}".replace(",", "."),
-    delta_pct(total_links, ant_links),
-)
+col4.metric("Links de produto", f"{total_links:,}".replace(",", "."))
 
 st.divider()
 
@@ -183,6 +155,66 @@ fig_split.update_layout(
     legend_title="",
 )
 st.plotly_chart(fig_split, use_container_width=True)
+
+# === Volume por hora do dia e por dia da semana ===
+col_h, col_d = st.columns(2)
+
+por_hora = run_query(
+    f"""
+    SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE 'America/Sao_Paulo')::int AS hora,
+           COUNT(*) AS msgs
+    FROM conversas_sofia
+    WHERE (created_at AT TIME ZONE 'America/Sao_Paulo')::date
+          BETWEEN '{data_inicio.isoformat()}' AND '{data_fim.isoformat()}'
+    GROUP BY hora
+    ORDER BY hora
+    """
+)
+horas_completas = pd.DataFrame({"hora": list(range(24))})
+por_hora = horas_completas.merge(por_hora, on="hora", how="left").fillna(0)
+por_hora["msgs"] = por_hora["msgs"].astype(int)
+por_hora["hora_label"] = por_hora["hora"].apply(lambda h: f"{int(h):02d}h")
+
+with col_h:
+    st.subheader("⏰ Volume por hora do dia")
+    fig_hora = px.bar(por_hora, x="hora_label", y="msgs", text="msgs")
+    fig_hora.update_traces(marker_color="#1abc9c", textposition="outside")
+    fig_hora.update_layout(
+        height=320,
+        margin=dict(l=0, r=0, t=10, b=0),
+        xaxis_title="",
+        yaxis_title="Mensagens",
+    )
+    st.plotly_chart(fig_hora, use_container_width=True)
+
+por_dow = run_query(
+    f"""
+    SELECT EXTRACT(DOW FROM created_at AT TIME ZONE 'America/Sao_Paulo')::int AS dow,
+           COUNT(*) AS msgs
+    FROM conversas_sofia
+    WHERE (created_at AT TIME ZONE 'America/Sao_Paulo')::date
+          BETWEEN '{data_inicio.isoformat()}' AND '{data_fim.isoformat()}'
+    GROUP BY dow
+    ORDER BY dow
+    """
+)
+nomes_dow = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
+dow_completos = pd.DataFrame({"dow": list(range(7))})
+por_dow = dow_completos.merge(por_dow, on="dow", how="left").fillna(0)
+por_dow["msgs"] = por_dow["msgs"].astype(int)
+por_dow["dia"] = por_dow["dow"].apply(lambda d: nomes_dow[int(d)])
+
+with col_d:
+    st.subheader("📅 Volume por dia da semana")
+    fig_dow = px.bar(por_dow, x="dia", y="msgs", text="msgs")
+    fig_dow.update_traces(marker_color="#e67e22", textposition="outside")
+    fig_dow.update_layout(
+        height=320,
+        margin=dict(l=0, r=0, t=10, b=0),
+        xaxis_title="",
+        yaxis_title="Mensagens",
+    )
+    st.plotly_chart(fig_dow, use_container_width=True)
 
 # === Top 5 produtos mais mostrados ===
 st.subheader("🏆 Top 5 produtos mais mostrados pela Sofia")
