@@ -3,6 +3,9 @@ import pandas as pd
 import psycopg2
 import plotly.express as px
 from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo
+
+BR_TZ = ZoneInfo("America/Sao_Paulo")
 
 st.set_page_config(page_title="Dashboard Sofia", page_icon="🤖", layout="wide")
 
@@ -35,7 +38,7 @@ def run_query(query: str) -> pd.DataFrame:
 
 
 st.title("🤖 Dashboard Sofia — Editora Fundamento")
-st.caption(f"Atualizado em {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+st.caption(f"Atualizado em {datetime.now(BR_TZ).strftime('%d/%m/%Y %H:%M')}")
 
 opcao = st.radio(
     "Período",
@@ -44,7 +47,7 @@ opcao = st.radio(
     index=2,
 )
 
-hoje = date.today()
+hoje = datetime.now(BR_TZ).date()
 if opcao == "Hoje":
     data_inicio = data_fim = hoje
 elif opcao == "Ontem":
@@ -84,52 +87,57 @@ diario = run_query(
     """
 )
 
-por_agente = run_query(
+# Periodo anterior (mesma duracao, deslocado pra tras) — pra comparacao
+periodo_dias = (data_fim - data_inicio).days + 1
+anterior_fim = data_inicio - timedelta(days=1)
+anterior_inicio = anterior_fim - timedelta(days=periodo_dias - 1)
+anterior = run_query(
     f"""
-    SELECT agente_usado,
-           SUM(total_mensagens) AS msgs,
-           SUM(transferencias_efetivadas) AS transferencias_ok,
-           SUM(transferencias_perdidas) AS transferencias_perdidas
-    FROM sofia_metricas_diarias
-    WHERE dia BETWEEN '{data_inicio.isoformat()}' AND '{data_fim.isoformat()}'
-    GROUP BY agente_usado
-    ORDER BY msgs DESC
+    SELECT * FROM sofia_dashboard_diario
+    WHERE dia BETWEEN '{anterior_inicio.isoformat()}' AND '{anterior_fim.isoformat()}'
     """
 )
 
-top_problemas = run_query(
-    """
-    SELECT telefone, dia, total_mensagens,
-           perguntas_repetidas_dados, transferencias_perdidas,
-           mensagens_irritacao, score_problema
-    FROM sofia_top_problemas_semana
-    ORDER BY score_problema DESC
-    LIMIT 15
-    """
-)
+
+def delta_pct(atual: int, ant: int):
+    if not ant:
+        return None
+    return f"{((atual - ant) / ant * 100):+.1f}% vs anterior"
+
+
+ant_clientes = int(anterior["clientes_unicos"].sum()) if not anterior.empty else 0
+ant_sozinha = int(anterior["clientes_atendidos_sozinha"].sum()) if not anterior.empty else 0
+ant_transferidos = int(anterior["clientes_transferidos"].sum()) if not anterior.empty else 0
+ant_links = int(anterior["mensagens_com_link_produto"].sum()) if not anterior.empty else 0
 
 # === Cards ===
 total_clientes = int(diario["clientes_unicos"].sum())
 total_sozinha = int(diario["clientes_atendidos_sozinha"].sum())
 total_transferidos = int(diario["clientes_transferidos"].sum())
 total_links = int(diario["mensagens_com_link_produto"].sum())
-pct_transf = (total_transferidos / total_clientes * 100) if total_clientes else 0
-pct_sozinha = (total_sozinha / total_clientes * 100) if total_clientes else 0
 
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Clientes únicos", f"{total_clientes:,}".replace(",", "."))
+col1.metric(
+    "Clientes únicos",
+    f"{total_clientes:,}".replace(",", "."),
+    delta_pct(total_clientes, ant_clientes),
+)
 col2.metric(
     "Atendidos sozinha",
     f"{total_sozinha:,}".replace(",", "."),
-    f"{pct_sozinha:.1f}% do total",
+    delta_pct(total_sozinha, ant_sozinha),
 )
 col3.metric(
     "Transferidos",
     f"{total_transferidos:,}".replace(",", "."),
-    f"{pct_transf:.1f}% do total",
+    delta_pct(total_transferidos, ant_transferidos),
     delta_color="inverse",
 )
-col4.metric("Links de produto", f"{total_links:,}".replace(",", "."))
+col4.metric(
+    "Links de produto",
+    f"{total_links:,}".replace(",", "."),
+    delta_pct(total_links, ant_links),
+)
 
 st.divider()
 
@@ -176,34 +184,43 @@ fig_split.update_layout(
 )
 st.plotly_chart(fig_split, use_container_width=True)
 
-# === Pizza por agente + tabela top problemas ===
-col_a, col_b = st.columns([1, 1.2])
-
-with col_a:
-    st.subheader("🤖 Distribuição por agente")
-    fig_agente = px.pie(por_agente, names="agente_usado", values="msgs", hole=0.4)
-    fig_agente.update_layout(height=350, margin=dict(l=0, r=0, t=10, b=0))
-    st.plotly_chart(fig_agente, use_container_width=True)
-
-with col_b:
-    st.subheader("📋 Top 15 conversas problemáticas")
-    if top_problemas.empty:
-        st.info("Nenhum problema registrado no período.")
-    else:
-        max_val = top_problemas["score_problema"].max()
-        max_score = (
-            int(max_val) if pd.notna(max_val) and max_val and max_val > 0 else 1
-        )
-        st.dataframe(
-            top_problemas,
-            use_container_width=True,
-            hide_index=True,
-            height=350,
-            column_config={
-                "score_problema": st.column_config.ProgressColumn(
-                    "Score", min_value=0, max_value=max_score, format="%d"
-                )
-            },
-        )
+# === Top 5 produtos mais mostrados ===
+st.subheader("🏆 Top 5 produtos mais mostrados pela Sofia")
+top_produtos = run_query(
+    f"""
+    WITH produtos AS (
+        SELECT (regexp_matches(resposta_sofia, 'editorafundamento\\.com\\.br/products/([a-z0-9-]+)', 'g'))[1] AS handle
+        FROM conversas_sofia
+        WHERE (created_at AT TIME ZONE 'America/Sao_Paulo')::date
+              BETWEEN '{data_inicio.isoformat()}' AND '{data_fim.isoformat()}'
+    )
+    SELECT handle, COUNT(*) AS mencoes
+    FROM produtos
+    GROUP BY handle
+    ORDER BY mencoes DESC
+    LIMIT 5
+    """
+)
+if top_produtos.empty:
+    st.info("Nenhum produto mostrado pela Sofia no período.")
+else:
+    top_produtos["produto"] = top_produtos["handle"].apply(
+        lambda h: " ".join(w.capitalize() for w in h.replace("-", " ").split())
+    )
+    fig_top = px.bar(
+        top_produtos.sort_values("mencoes"),
+        x="mencoes",
+        y="produto",
+        orientation="h",
+        text="mencoes",
+    )
+    fig_top.update_traces(marker_color="#9b59b6", textposition="outside")
+    fig_top.update_layout(
+        height=320,
+        margin=dict(l=0, r=0, t=10, b=0),
+        xaxis_title="Vezes mostrado",
+        yaxis_title="",
+    )
+    st.plotly_chart(fig_top, use_container_width=True)
 
 st.caption("Dados cacheados por 5 minutos. Recarregue a página para forçar atualização.")
