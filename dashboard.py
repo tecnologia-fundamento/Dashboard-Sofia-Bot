@@ -87,11 +87,22 @@ diario = run_query(
     """
 )
 
-# === Cards ===
-total_clientes = int(diario["clientes_unicos"].sum())
-total_sozinha = int(diario["clientes_atendidos_sozinha"].sum())
-total_transferidos = int(diario["clientes_transferidos"].sum())
-total_links = int(diario["mensagens_com_link_produto"].sum())
+# === Cards (queries diretas pra evitar overcounting de clientes recorrentes) ===
+cards_data = run_query(
+    f"""
+    SELECT
+        COUNT(DISTINCT telefone) AS clientes_unicos,
+        COUNT(DISTINCT telefone) FILTER (WHERE escalado_humano) AS transferidos,
+        COUNT(*) FILTER (WHERE resposta_sofia LIKE '%/products/%') AS links_produto
+    FROM conversas_sofia
+    WHERE (created_at AT TIME ZONE 'America/Sao_Paulo')::date
+          BETWEEN '{data_inicio.isoformat()}' AND '{data_fim.isoformat()}'
+    """
+)
+total_clientes = int(cards_data["clientes_unicos"].iloc[0])
+total_transferidos = int(cards_data["transferidos"].iloc[0])
+total_sozinha = total_clientes - total_transferidos
+total_links = int(cards_data["links_produto"].iloc[0])
 pct_sozinha = (total_sozinha / total_clientes * 100) if total_clientes else 0
 pct_transf = (total_transferidos / total_clientes * 100) if total_clientes else 0
 
